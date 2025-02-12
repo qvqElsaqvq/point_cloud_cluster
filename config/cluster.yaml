@@ -1,0 +1,10 @@
+point_cloud_cluster_node:
+    ros__parameters:
+        input_cloud_topic: "/cloud_registered_body"
+        output_cloud_topic: "/cloud_obstacle"
+        use_downsample: true # 是否使用体素滤波器
+        leaf_size: 0.1 # 体素滤波器的体素大小
+        obstacle_x_min: -10.0 # 聚类范围的x最小值(livox坐标系)
+        obstacle_x_max: 10.0 # 聚类范围的x最大值(livox坐标系)
+        obstacle_y_min: -10.0 # 聚类范围的y最小值(livox坐标系)
+        obstacle_y_max: 10.0 # 聚类范围的y最大值(livox坐标系)
