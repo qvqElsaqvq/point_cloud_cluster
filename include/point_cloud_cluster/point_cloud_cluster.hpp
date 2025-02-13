@@ -29,7 +29,8 @@ public:
     explicit PointCloudCluster();
 
     void pointCloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr& msg);
-    void cloud_cluster(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud);
+    void cloud_cluster(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, const sensor_msgs::msg::PointCloud2::ConstPtr& msg);
+    void point_cloud_cut(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud);
 
 private:
     pcl::PassThrough<pcl::PointXYZ> pass_through_filter_x_;
@@ -39,6 +40,7 @@ private:
     std::string input_cloud_topic_;
     std::string output_cloud_topic_;
     std::string point_frame_;
+    std::string prev_cloud_file_name_;
     float leaf_size_;          // 体素滤波器的体素大小
     bool use_downsample_;
     float obstacle_x_min_;     // 聚类点云范围(livox坐标系)
@@ -48,6 +50,9 @@ private:
     float obstacle_z_min_;
     float obstacle_z_max_;
     sensor_msgs::msg::PointCloud2::SharedPtr output_cloud_;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_;
+    pcl::search::KdTree<pcl::PointXYZ>::Ptr tree_;  // 创建KdTreee对象作为搜索方法
+    pcl::PointCloud<pcl::PointXYZ>::Ptr prev_cloud_;
 
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_sub_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr cluster_pub_;
