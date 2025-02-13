@@ -30,13 +30,17 @@ public:
 
     void pointCloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr& msg);
     void cloud_cluster(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, const sensor_msgs::msg::PointCloud2::ConstPtr& msg);
-    void point_cloud_cut(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud);
+    void point_cloud_cut(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, const sensor_msgs::msg::PointCloud2::ConstPtr& msg);
 
 private:
     pcl::PassThrough<pcl::PointXYZ> pass_through_filter_x_;
     pcl::PassThrough<pcl::PointXYZ> pass_through_filter_y_;
     pcl::PassThrough<pcl::PointXYZ> pass_through_filter_z_;
-    pcl::VoxelGrid<pcl::PointXYZ> voxfilter;
+    pcl::PassThrough<pcl::PointXYZ> pass_through_filter_x_cut_;
+    pcl::PassThrough<pcl::PointXYZ> pass_through_filter_y_cut_;
+    pcl::PassThrough<pcl::PointXYZ> pass_through_filter_z_cut_;
+    pcl::VoxelGrid<pcl::PointXYZ> voxfilter_;
+    pcl::VoxelGrid<pcl::PointXYZ> voxfilter_prev_;
     std::string input_cloud_topic_;
     std::string output_cloud_topic_;
     std::string point_frame_;
@@ -49,13 +53,19 @@ private:
     float obstacle_y_max_;
     float obstacle_z_min_;
     float obstacle_z_max_;
+    bool is_first_time_;
+    double cut_radius_;
     sensor_msgs::msg::PointCloud2::SharedPtr output_cloud_;
+    sensor_msgs::msg::PointCloud2::SharedPtr cloud_cutted_;
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_;
     pcl::search::KdTree<pcl::PointXYZ>::Ptr tree_;  // 创建KdTreee对象作为搜索方法
     pcl::PointCloud<pcl::PointXYZ>::Ptr prev_cloud_;
+    pcl::PCLPointCloud2 cloudBlob;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_cut_;
 
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_sub_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr cluster_pub_;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_cut_pub_;
 };
 
 #endif //POINT_CLOUD_CLUSTER_HPP

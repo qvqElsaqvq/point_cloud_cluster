@@ -3,12 +3,13 @@ point_cloud_cluster_node:
         input_cloud_topic: "/livox/lidar_PointCloud2"
         output_cloud_topic: "/point_cloud_cluster"
         point_frame: "livox"
-        use_downsample: false # 是否使用体素滤波器
-        leaf_size: 0.1 # 体素滤波器的体素大小
+        use_downsample: true # 是否使用体素滤波器
+        leaf_size: 0.05 # 体素滤波器的体素大小
         obstacle_x_min: -2.0 # 聚类范围的x最小值(livox坐标系)
         obstacle_x_max: 2.0 # 聚类范围的x最大值(livox坐标系)
         obstacle_y_min: -3.5 # 聚类范围的y最小值(livox坐标系)
         obstacle_y_max: 0.3 # 聚类范围的y最大值(livox坐标系)
         obstacle_z_min: -0.8 # 聚类范围的y最小值(livox坐标系)
         obstacle_z_max: 1.0 # 聚类范围的y最大值(livox坐标系)
-        prev_cloud_file_name: "/home/elsa/ws_point_cloud_test2/src/point_cloud_cluster/2024_12_01_21_54_13_merged.pcd"
+        prev_cloud_file_name: "/home/elsa/ws_point_cloud_test2/src/point_cloud_cluster/2025_02_13_14_10_44_1.pcd"
+        cut_radius: 0.1
