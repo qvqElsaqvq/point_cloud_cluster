@@ -9,8 +9,12 @@ PointCloudCluster::PointCloudCluster() : Node("point_cloud_cluster_node")
     RCLCPP_INFO(this->get_logger(), "point_cloud_cluster_node is created");
     this->declare_parameter("input_cloud_topic", "/livox/lidar_PointCloud2");
     this->declare_parameter("output_cloud_topic", "/point_cloud_cluster");
+	this->declare_parameter("output_cloud_robot_topic", "/cloud_obstacle");
 	this->declare_parameter("point_frame", "livox");
     this->declare_parameter("leaf_size", 0.1);
+	this->declare_parameter("prev_map_leaf_size", 0.1);
+	this->declare_parameter("point_num_for_normal", 50);
+	this->declare_parameter("angle_threshold", 0.1);
     this->declare_parameter("use_downsample", false);
     this->declare_parameter("obstacle_x_min", -10.0);
     this->declare_parameter("obstacle_x_max", 10.0);
@@ -18,13 +22,20 @@ PointCloudCluster::PointCloudCluster() : Node("point_cloud_cluster_node")
     this->declare_parameter("obstacle_y_max", 10.0);
     this->declare_parameter("obstacle_z_min", -10.0);
     this->declare_parameter("obstacle_z_max", 10.0);
+	this->declare_parameter("obstacle_range_min", 0.5);
+	this->declare_parameter("obstacle_range_max", 2.0);
     this->declare_parameter<std::string>("prev_cloud_file_name", "");
 	this->declare_parameter("cut_radius", 0.001);
+	this->declare_parameter("nearby_points_threshold", 10);
 
     this->get_parameter("input_cloud_topic", input_cloud_topic_);
     this->get_parameter("output_cloud_topic", output_cloud_topic_);
+	this->get_parameter("output_cloud_robot_topic", output_cloud_robot_topic_);
 	this->get_parameter("point_frame", point_frame_);
     this->get_parameter("leaf_size", leaf_size_);
+	this->get_parameter("prev_map_leaf_size", prev_map_leaf_size_);
+	this->get_parameter("point_num_for_normal", point_num_for_normal_);
+	this->get_parameter("angle_threshold", angle_threshold_);
     this->get_parameter("use_downsample", use_downsample_);
     this->get_parameter("obstacle_x_min", obstacle_x_min_);
     this->get_parameter("obstacle_x_max", obstacle_x_max_);
@@ -32,8 +43,11 @@ PointCloudCluster::PointCloudCluster() : Node("point_cloud_cluster_node")
     this->get_parameter("obstacle_y_max", obstacle_y_max_);
     this->get_parameter("obstacle_z_min", obstacle_z_min_);
     this->get_parameter("obstacle_z_max", obstacle_z_max_);
+	this->get_parameter("obstacle_range_min", obstacle_range_min_);
+	this->get_parameter("obstacle_range_max", obstacle_range_max_);
 	this->get_parameter_or<std::string>("prev_cloud_file_name", prev_cloud_file_name_, "");
 	this->get_parameter("cut_radius", cut_radius_);
+	this->get_parameter("nearby_points_threshold", nearby_points_threshold_);
 
     // 设置滤波器
     pass_through_filter_x_.setFilterFieldName("x");
@@ -55,7 +69,7 @@ PointCloudCluster::PointCloudCluster() : Node("point_cloud_cluster_node")
 	pass_through_filter_z_cut_.setFilterLimits(obstacle_z_min_, obstacle_z_max_);
 	pass_through_filter_z_cut_.setFilterLimitsNegative(false);
     voxfilter_.setLeafSize(leaf_size_, leaf_size_, leaf_size_);
-	voxfilter_prev_.setLeafSize(0.05, 0.05, 0.05);
+	voxfilter_prev_.setLeafSize(prev_map_leaf_size_, prev_map_leaf_size_, prev_map_leaf_size_);
 
     output_cloud_ = std::make_shared<sensor_msgs::msg::PointCloud2>();
     tree_ = std::make_shared<pcl::search::KdTree<pcl::PointXYZ>>();
@@ -64,6 +78,7 @@ PointCloudCluster::PointCloudCluster() : Node("point_cloud_cluster_node")
 	cloud_cutted_ = std::make_shared<sensor_msgs::msg::PointCloud2>();
 	cloud_cut_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
 
+	//加载先验地图
     pcl::io::loadPCDFile(prev_cloud_file_name_, cloudBlob);
 	pcl::fromPCLPointCloud2(cloudBlob, *prev_cloud_);
 	// 直通滤波
@@ -76,16 +91,23 @@ PointCloudCluster::PointCloudCluster() : Node("point_cloud_cluster_node")
 	voxfilter_prev_.setInputCloud(prev_cloud_);
 	voxfilter_prev_.filter(*prev_cloud_);
 
+	// 初始化pub和sub
     pointcloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(input_cloud_topic_,
         10, std::bind(&PointCloudCluster::pointCloudCallback, this, std::placeholders::_1));
-    cluster_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(output_cloud_topic_, 10);
+    cluster_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(output_cloud_robot_topic_, 10);
 	cloud_cut_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/point_cloud_cut", 10);
+	cloud_obstacle_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(output_cloud_topic_, 10);
 
     RCLCPP_INFO(this->get_logger(), "point_cloud_cluster_node初始化完成");
 }
 
 void PointCloudCluster::pointCloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr& msg)
 {
+	if (msg->data.empty()){
+		RCLCPP_ERROR(this->get_logger(), "接收到的点云数据为空.");
+		return;
+	}
+
     // 将点云转换为pcl格式
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
     pcl::fromROSMsg(*msg, *cloud);
@@ -104,9 +126,17 @@ void PointCloudCluster::pointCloudCallback(const sensor_msgs::msg::PointCloud2::
     }
 	RCLCPP_INFO(this->get_logger(), "降采样后点云数量为：%lu", cloud->points.size());
 
+	pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_obstacle(new pcl::PointCloud<pcl::PointXYZ>);
+	pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_robot(new pcl::PointCloud<pcl::PointXYZ>);
     tree_->setInputCloud(cloud);
+	//点云分割
+	obstacle_segmentation(cloud, cloud_obstacle);
+	//发布障碍物点云数据
+	cloud_obstacle_->header.frame_id = point_frame_;
+	cloud_obstacle_->header.stamp = msg->header.stamp;
+	cloud_obstacle_pub_->publish(*cloud_obstacle_);
     //去除先验地图部分
-	point_cloud_cut(cloud, msg);
+	point_cloud_cut(cloud_obstacle, msg);
     //点云聚类
     cloud_cluster(cloud, msg);
 }
@@ -118,7 +148,7 @@ void PointCloudCluster::cloud_cluster(pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud
     pcl::EuclideanClusterExtraction<pcl::PointXYZ> ec;
     ec.setClusterTolerance(0.1); // 单位：m
     ec.setMinClusterSize(100);
-    ec.setMaxClusterSize(25000);
+    ec.setMaxClusterSize(2500);
     ec.setSearchMethod(tree_);
     ec.setInputCloud(cloud_cut_);
     //聚类抽取结果保存在一个数组中，数组中每个元素代表抽取的一个组件点云的下标
@@ -160,7 +190,7 @@ void PointCloudCluster::point_cloud_cut(pcl::PointCloud<pcl::PointXYZ>::Ptr& clo
 
 	for (size_t i = 0; i < cloud->size(); i++)
 	{
-		if (kdtree->radiusSearch(cloud->points[i], cut_radius_, pointIdxRadiusSearch, pointRadiusSquaredDistance) > 0)
+		if (kdtree->radiusSearch(cloud->points[i], cut_radius_, pointIdxRadiusSearch, pointRadiusSquaredDistance) < 100)
 		{
 			indices.push_back(i);
 		}
@@ -184,4 +214,44 @@ void PointCloudCluster::point_cloud_cut(pcl::PointCloud<pcl::PointXYZ>::Ptr& clo
 	cloud_cutted_->header.stamp = msg->header.stamp;
 	cloud_cutted_->header.frame_id = point_frame_;
 	cloud_cut_pub_->publish(*cloud_cutted_);
+}
+
+void PointCloudCluster::obstacle_segmentation(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud,
+	pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_out)
+{
+	// 创建法向量估计对象
+	pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> ne;
+	ne.setInputCloud(cloud);
+	// 创建一个空的kdtree对象，并把它传递给法向量估计对象
+	pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>());
+	ne.setSearchMethod(tree);
+	// 输出数据集
+	pcl::PointCloud<pcl::Normal>::Ptr cloud_normals(new pcl::PointCloud<pcl::Normal>);
+	ne.setKSearch(point_num_for_normal_); // 使用最近的point_num_for_normal_个点计算法向量
+	ne.compute(*cloud_normals); // 计算法向量
+
+	for (long i = 0; i < cloud->points.size(); i++)
+	{
+		float gradient = acos(
+			sqrt(pow(cloud_normals->points[i].normal_x, 2) + pow(cloud_normals->points[i].normal_y, 2)) /
+			sqrt(pow(cloud_normals->points[i].normal_x, 2) + pow(cloud_normals->points[i].normal_y, 2) +
+				pow(cloud_normals->points[i].normal_z, 2)));
+		// 如果法向量与地面的夹角小于角度阈值
+		if (gradient < angle_threshold_)
+		{
+			// 按点云范围进行筛选
+			// 如果该点和机器人位置的距离不在距离阈值 obstacle_range_min ～ obstacle_range_max范围内
+			if (pow(cloud->points[i].x, 2) + pow(cloud->points[i].y, 2) < pow(obstacle_range_min_, 2) ||
+			    pow(cloud->points[i].x, 2) + pow(cloud->points[i].y, 2) > pow(obstacle_range_max_, 2))
+			{
+			    continue;
+			}
+			cloud_out->points.push_back(cloud->points[i]);
+		}
+	}
+
+	cloud_out->width = cloud_out->points.size();
+	cloud_out->height = 1;
+	cloud_out->is_dense = true;
+	pcl::toROSMsg(*cloud_out, *cloud_obstacle_);
 }
